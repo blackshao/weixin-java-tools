@@ -2,7 +2,7 @@ package cn.binarywang.wx.miniapp.api;
 
 import cn.binarywang.wx.miniapp.bean.WxMaJscode2SessionResult;
 import cn.binarywang.wx.miniapp.config.WxMaConfig;
-import me.chanjar.weixin.common.exception.WxErrorException;
+import me.chanjar.weixin.common.error.WxErrorException;
 import me.chanjar.weixin.common.util.http.MediaUploadRequestExecutor;
 import me.chanjar.weixin.common.util.http.RequestExecutor;
 import me.chanjar.weixin.common.util.http.RequestHttp;
@@ -17,12 +17,14 @@ public interface WxMaService {
   String GET_ACCESS_TOKEN_URL = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s";
 
   String JSCODE_TO_SESSION_URL = "https://api.weixin.qq.com/sns/jscode2session";
+
   /**
-   * 获取登录后的session信息
+   * 获取登录后的session信息.
    *
    * @param jsCode 登录时获取的 code
    */
   WxMaJscode2SessionResult jsCode2SessionInfo(String jsCode) throws WxErrorException;
+
   /**
    * <pre>
    * 验证消息的确来自微信服务器.
@@ -131,9 +133,56 @@ public interface WxMaService {
 
   /**
    * 返回模板配置相关接口方法的实现类对象, 以方便调用其各个接口.
+   *
    * @return WxMaTemplateService
    */
   WxMaTemplateService getTemplateService();
+
+  /**
+   * 数据分析相关查询服务.
+   *
+   * @return WxMaAnalysisService
+   */
+  WxMaAnalysisService getAnalysisService();
+
+  /**
+   * 返回代码操作相关的 API.
+   *
+   * @return WxMaCodeService
+   */
+  WxMaCodeService getCodeService();
+
+  /**
+   * 返回jsapi操作相关的 API服务类对象.
+   *
+   * @return WxMaJsapiService
+   */
+  WxMaJsapiService getJsapiService();
+
+  /**
+   * 小程序修改服务器地址、成员管理 API.
+   *
+   * @return WxMaSettingService
+   */
+  WxMaSettingService getSettingService();
+
+  /**
+   * 返回分享相关查询服务.
+   * @return WxMaShareService
+   */
+  WxMaShareService getShareService();
+
+  /**
+   * 返回微信运动相关接口服务对象.
+   * @return WxMaShareService
+   */
+  WxMaRunService getRunService();
+
+  /**
+   * 返回内容安全相关接口服务对象.
+   * @return WxMaShareService
+   */
+  WxMaSecCheckService getSecCheckService();
 
   /**
    * 初始化http请求对象.

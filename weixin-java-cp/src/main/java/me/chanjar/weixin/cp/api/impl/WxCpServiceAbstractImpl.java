@@ -1,44 +1,53 @@
 package me.chanjar.weixin.cp.api.impl;
 
+import java.io.File;
+import java.io.IOException;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+
 import me.chanjar.weixin.common.bean.WxJsapiSignature;
-import me.chanjar.weixin.common.bean.menu.WxMenu;
-import me.chanjar.weixin.common.bean.result.WxError;
-import me.chanjar.weixin.common.bean.result.WxMediaUploadResult;
-import me.chanjar.weixin.common.exception.WxErrorException;
+import me.chanjar.weixin.common.error.WxError;
+import me.chanjar.weixin.common.error.WxErrorException;
 import me.chanjar.weixin.common.session.StandardSessionManager;
 import me.chanjar.weixin.common.session.WxSession;
 import me.chanjar.weixin.common.session.WxSessionManager;
+import me.chanjar.weixin.common.util.DataUtils;
 import me.chanjar.weixin.common.util.RandomUtils;
 import me.chanjar.weixin.common.util.crypto.SHA1;
 import me.chanjar.weixin.common.util.http.RequestExecutor;
 import me.chanjar.weixin.common.util.http.RequestHttp;
 import me.chanjar.weixin.common.util.http.SimpleGetRequestExecutor;
 import me.chanjar.weixin.common.util.http.SimplePostRequestExecutor;
-import me.chanjar.weixin.cp.api.*;
-import me.chanjar.weixin.cp.bean.*;
+import me.chanjar.weixin.cp.api.WxCpAgentService;
+import me.chanjar.weixin.cp.api.WxCpChatService;
+import me.chanjar.weixin.cp.api.WxCpDepartmentService;
+import me.chanjar.weixin.cp.api.WxCpMediaService;
+import me.chanjar.weixin.cp.api.WxCpMenuService;
+import me.chanjar.weixin.cp.api.WxCpOAuth2Service;
+import me.chanjar.weixin.cp.api.WxCpService;
+import me.chanjar.weixin.cp.api.WxCpTagService;
+import me.chanjar.weixin.cp.api.WxCpUserService;
+import me.chanjar.weixin.cp.bean.WxCpMessage;
+import me.chanjar.weixin.cp.bean.WxCpMessageSendResult;
 import me.chanjar.weixin.cp.config.WxCpConfigStorage;
-import org.apache.commons.lang3.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.List;
 
 public abstract class WxCpServiceAbstractImpl<H, P> implements WxCpService, RequestHttp<H, P> {
   protected final Logger log = LoggerFactory.getLogger(this.getClass());
 
   private WxCpUserService userService = new WxCpUserServiceImpl(this);
+  private WxCpChatService chatService = new WxCpChatServiceImpl(this);
   private WxCpDepartmentService departmentService = new WxCpDepartmentServiceImpl(this);
   private WxCpMediaService mediaService = new WxCpMediaServiceImpl(this);
   private WxCpMenuService menuService = new WxCpMenuServiceImpl(this);
   private WxCpOAuth2Service oauth2Service = new WxCpOAuth2ServiceImpl(this);
   private WxCpTagService tagService = new WxCpTagServiceImpl(this);
+  private WxCpAgentService agentService = new WxCpAgentServiceImpl(this);
 
   /**
    * 全局的是否正在刷新access token的锁
@@ -187,7 +196,7 @@ public abstract class WxCpServiceAbstractImpl<H, P> implements WxCpService, Requ
             this.log.debug("微信系统繁忙，{} ms 后重试(第{}次)", sleepMillis, retryTimes + 1);
             Thread.sleep(sleepMillis);
           } catch (InterruptedException e1) {
-            throw new RuntimeException(e1);
+            Thread.currentThread().interrupt();
           }
         } else {
           throw e;
@@ -200,6 +209,8 @@ public abstract class WxCpServiceAbstractImpl<H, P> implements WxCpService, Requ
   }
 
   protected <T, E> T executeInternal(RequestExecutor<T, E> executor, String uri, E data) throws WxErrorException {
+    E dataForLog = DataUtils.handleDataWithSecret(data);
+
     if (uri.contains("access_token=")) {
       throw new IllegalArgumentException("uri参数中不允许有access_token: " + uri);
     }
@@ -209,7 +220,7 @@ public abstract class WxCpServiceAbstractImpl<H, P> implements WxCpService, Requ
 
     try {
       T result = executor.execute(uriWithAccessToken, data);
-      this.log.debug("\n【请求地址】: {}\n【请求参数】：{}\n【响应数据】：{}", uriWithAccessToken, data, result);
+      this.log.debug("\n【请求地址】: {}\n【请求参数】：{}\n【响应数据】：{}", uriWithAccessToken, dataForLog, result);
       return result;
     } catch (WxErrorException e) {
       WxError error = e.getError();
@@ -226,12 +237,12 @@ public abstract class WxCpServiceAbstractImpl<H, P> implements WxCpService, Requ
       }
 
       if (error.getErrorCode() != 0) {
-        this.log.error("\n【请求地址】: {}\n【请求参数】：{}\n【错误信息】：{}", uriWithAccessToken, data, error);
+        this.log.error("\n【请求地址】: {}\n【请求参数】：{}\n【错误信息】：{}", uriWithAccessToken, dataForLog, error);
         throw new WxErrorException(error, e);
       }
       return null;
     } catch (IOException e) {
-      this.log.error("\n【请求地址】: {}\n【请求参数】：{}\n【异常信息】：{}", uriWithAccessToken, data, e.getMessage());
+      this.log.error("\n【请求地址】: {}\n【请求参数】：{}\n【异常信息】：{}", uriWithAccessToken, dataForLog, e.getMessage());
       throw new RuntimeException(e);
     }
   }
@@ -335,7 +346,12 @@ public abstract class WxCpServiceAbstractImpl<H, P> implements WxCpService, Requ
   }
 
   @Override
-  public RequestHttp getRequestHttp() {
+  public WxCpChatService getChatService() {
+    return chatService;
+  }
+
+  @Override
+  public RequestHttp<?, ?> getRequestHttp() {
     return this;
   }
 
@@ -367,5 +383,14 @@ public abstract class WxCpServiceAbstractImpl<H, P> implements WxCpService, Requ
   @Override
   public void setTagService(WxCpTagService tagService) {
     this.tagService = tagService;
+  }
+
+  @Override
+  public WxCpAgentService getAgentService() {
+    return agentService;
+  }
+
+  public void setAgentService(WxCpAgentService agentService) {
+    this.agentService = agentService;
   }
 }

@@ -11,22 +11,29 @@ import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.BasicResponseHandler;
 import org.apache.http.impl.client.CloseableHttpClient;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+import cn.binarywang.wx.miniapp.api.WxMaAnalysisService;
+import cn.binarywang.wx.miniapp.api.WxMaCodeService;
+import cn.binarywang.wx.miniapp.api.WxMaJsapiService;
 import cn.binarywang.wx.miniapp.api.WxMaMediaService;
 import cn.binarywang.wx.miniapp.api.WxMaMsgService;
 import cn.binarywang.wx.miniapp.api.WxMaQrcodeService;
+import cn.binarywang.wx.miniapp.api.WxMaRunService;
+import cn.binarywang.wx.miniapp.api.WxMaSecCheckService;
 import cn.binarywang.wx.miniapp.api.WxMaService;
+import cn.binarywang.wx.miniapp.api.WxMaSettingService;
+import cn.binarywang.wx.miniapp.api.WxMaShareService;
 import cn.binarywang.wx.miniapp.api.WxMaTemplateService;
 import cn.binarywang.wx.miniapp.api.WxMaUserService;
 import cn.binarywang.wx.miniapp.bean.WxMaJscode2SessionResult;
 import cn.binarywang.wx.miniapp.config.WxMaConfig;
-import cn.binarywang.wx.miniapp.constant.WxMaConstants;
 import com.google.common.base.Joiner;
+import com.google.gson.Gson;
+import lombok.extern.slf4j.Slf4j;
 import me.chanjar.weixin.common.bean.WxAccessToken;
-import me.chanjar.weixin.common.bean.result.WxError;
-import me.chanjar.weixin.common.exception.WxErrorException;
+import me.chanjar.weixin.common.error.WxError;
+import me.chanjar.weixin.common.error.WxErrorException;
+import me.chanjar.weixin.common.util.DataUtils;
 import me.chanjar.weixin.common.util.crypto.SHA1;
 import me.chanjar.weixin.common.util.http.HttpType;
 import me.chanjar.weixin.common.util.http.RequestExecutor;
@@ -36,12 +43,13 @@ import me.chanjar.weixin.common.util.http.SimplePostRequestExecutor;
 import me.chanjar.weixin.common.util.http.apache.ApacheHttpClientBuilder;
 import me.chanjar.weixin.common.util.http.apache.DefaultApacheHttpClientBuilder;
 
+import static cn.binarywang.wx.miniapp.constant.WxMaConstants.ErrorCode.*;
+
 /**
  * @author <a href="https://github.com/binarywang">Binary Wang</a>
  */
+@Slf4j
 public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpClient, HttpHost> {
-  private final Logger log = LoggerFactory.getLogger(this.getClass());
-
   private CloseableHttpClient httpClient;
   private HttpHost httpProxy;
   private WxMaConfig wxMaConfig;
@@ -51,9 +59,18 @@ public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpCl
   private WxMaUserService userService = new WxMaUserServiceImpl(this);
   private WxMaQrcodeService qrCodeService = new WxMaQrcodeServiceImpl(this);
   private WxMaTemplateService templateService = new WxMaTemplateServiceImpl(this);
+  private WxMaAnalysisService analysisService = new WxMaAnalysisServiceImpl(this);
+  private WxMaCodeService codeService = new WxMaCodeServiceImpl(this);
+  private WxMaSettingService settingService = new WxMaSettingServiceImpl(this);
+  private WxMaJsapiService jsapiService = new WxMaJsapiServiceImpl(this);
+  private WxMaShareService shareService = new WxMaShareServiceImpl(this);
+  private WxMaRunService runService = new WxMaRunServiceImpl(this);
+  private WxMaSecCheckService secCheckService = new WxMaSecCheckServiceImpl(this);
 
   private int retrySleepMillis = 1000;
   private int maxRetryTimes = 5;
+
+  protected static final Gson GSON = new Gson();
 
   @Override
   public CloseableHttpClient getRequestHttpClient() {
@@ -182,7 +199,7 @@ public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpCl
         return this.executeInternal(executor, uri, data);
       } catch (WxErrorException e) {
         if (retryTimes + 1 > this.maxRetryTimes) {
-          this.log.warn("重试达到最大次数【{}】", maxRetryTimes);
+          log.warn("重试达到最大次数【{}】", maxRetryTimes);
           //最后一次重试失败后，直接抛出异常，不再等待
           throw new RuntimeException("微信服务端异常，超出重试次数");
         }
@@ -192,10 +209,10 @@ public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpCl
         if (error.getErrorCode() == -1) {
           int sleepMillis = this.retrySleepMillis * (1 << retryTimes);
           try {
-            this.log.warn("微信系统繁忙，{} ms 后重试(第{}次)", sleepMillis, retryTimes + 1);
+            log.warn("微信系统繁忙，{} ms 后重试(第{}次)", sleepMillis, retryTimes + 1);
             Thread.sleep(sleepMillis);
           } catch (InterruptedException e1) {
-            throw new RuntimeException(e1);
+            Thread.currentThread().interrupt();
           }
         } else {
           throw e;
@@ -203,11 +220,13 @@ public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpCl
       }
     } while (retryTimes++ < this.maxRetryTimes);
 
-    this.log.warn("重试达到最大次数【{}】", this.maxRetryTimes);
+    log.warn("重试达到最大次数【{}】", this.maxRetryTimes);
     throw new RuntimeException("微信服务端异常，超出重试次数");
   }
 
-  public <T, E> T executeInternal(RequestExecutor<T, E> executor, String uri, E data) throws WxErrorException {
+  private <T, E> T executeInternal(RequestExecutor<T, E> executor, String uri, E data) throws WxErrorException {
+    E dataForLog = DataUtils.handleDataWithSecret(data);
+
     if (uri.contains("access_token=")) {
       throw new IllegalArgumentException("uri参数中不允许有access_token: " + uri);
     }
@@ -217,16 +236,16 @@ public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpCl
 
     try {
       T result = executor.execute(uriWithAccessToken, data);
-      this.log.debug("\n【请求地址】: {}\n【请求参数】：{}\n【响应数据】：{}", uriWithAccessToken, data, result);
+      log.debug("\n【请求地址】: {}\n【请求参数】：{}\n【响应数据】：{}", uriWithAccessToken, dataForLog, result);
       return result;
     } catch (WxErrorException e) {
       WxError error = e.getError();
       /*
        * 发生以下情况时尝试刷新access_token
        */
-      if (error.getErrorCode() == WxMaConstants.ErrorCode.ERR_40001
-        || error.getErrorCode() == WxMaConstants.ErrorCode.ERR_42001
-        || error.getErrorCode() == WxMaConstants.ErrorCode.ERR_40014) {
+      if (error.getErrorCode() == ERR_40001
+        || error.getErrorCode() == ERR_42001
+        || error.getErrorCode() == ERR_40014) {
         // 强制设置wxMpConfigStorage它的access token过期了，这样在下一次请求里就会刷新access token
         this.getWxMaConfig().expireAccessToken();
         if (this.getWxMaConfig().autoRefreshToken()) {
@@ -235,12 +254,12 @@ public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpCl
       }
 
       if (error.getErrorCode() != 0) {
-        this.log.error("\n【请求地址】: {}\n【请求参数】：{}\n【错误信息】：{}", uriWithAccessToken, data, error);
+        log.error("\n【请求地址】: {}\n【请求参数】：{}\n【错误信息】：{}", uriWithAccessToken, dataForLog, error);
         throw new WxErrorException(error, e);
       }
       return null;
     } catch (IOException e) {
-      this.log.error("\n【请求地址】: {}\n【请求参数】：{}\n【异常信息】：{}", uriWithAccessToken, data, e.getMessage());
+      log.error("\n【请求地址】: {}\n【请求参数】：{}\n【异常信息】：{}", uriWithAccessToken, dataForLog, e.getMessage());
       throw new RuntimeException(e);
     }
   }
@@ -289,5 +308,40 @@ public class WxMaServiceImpl implements WxMaService, RequestHttp<CloseableHttpCl
   @Override
   public WxMaTemplateService getTemplateService() {
     return this.templateService;
+  }
+
+  @Override
+  public WxMaAnalysisService getAnalysisService() {
+    return this.analysisService;
+  }
+
+  @Override
+  public WxMaCodeService getCodeService() {
+    return this.codeService;
+  }
+
+  @Override
+  public WxMaJsapiService getJsapiService() {
+    return this.jsapiService;
+  }
+
+  @Override
+  public WxMaSettingService getSettingService() {
+    return this.settingService;
+  }
+
+  @Override
+  public WxMaShareService getShareService() {
+    return this.shareService;
+  }
+
+  @Override
+  public WxMaRunService getRunService() {
+    return this.runService;
+  }
+
+  @Override
+  public WxMaSecCheckService getSecCheckService() {
+    return this.secCheckService;
   }
 }

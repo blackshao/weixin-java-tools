@@ -1,5 +1,10 @@
 package com.github.binarywang.wxpay.service.impl;
 
+import java.nio.charset.StandardCharsets;
+import javax.net.ssl.SSLContext;
+
+import org.apache.commons.lang3.StringUtils;
+
 import com.github.binarywang.wxpay.bean.WxPayApiData;
 import com.github.binarywang.wxpay.exception.WxPayException;
 import jodd.http.HttpConnectionProvider;
@@ -10,10 +15,6 @@ import jodd.http.ProxyInfo.ProxyType;
 import jodd.http.net.SSLSocketHttpConnectionProvider;
 import jodd.http.net.SocketHttpConnectionProvider;
 import jodd.util.Base64;
-import org.apache.commons.lang3.StringUtils;
-
-import javax.net.ssl.SSLContext;
-import java.nio.charset.StandardCharsets;
 
 /**
  * 微信支付请求实现类，jodd-http实现.
@@ -29,7 +30,9 @@ public class WxPayServiceJoddHttpImpl extends BaseWxPayServiceImpl {
       byte[] responseBytes = request.send().bodyBytes();
       final String responseString = Base64.encodeToString(responseBytes);
       this.log.info("\n【请求地址】：{}\n【请求数据】：{}\n【响应数据(Base64编码后)】：{}", url, requestStr, responseString);
-      wxApiData.set(new WxPayApiData(url, requestStr, responseString, null));
+      if (this.getConfig().isIfSaveApiData()) {
+        wxApiData.set(new WxPayApiData(url, requestStr, responseString, null));
+      }
       return responseBytes;
     } catch (Exception e) {
       this.log.error("\n【请求地址】：{}\n【请求数据】：{}\n【异常信息】：{}", url, requestStr, e.getMessage());
@@ -45,7 +48,9 @@ public class WxPayServiceJoddHttpImpl extends BaseWxPayServiceImpl {
       String responseString = this.getResponseString(request.send());
 
       this.log.info("\n【请求地址】：{}\n【请求数据】：{}\n【响应数据】：{}", url, requestStr, responseString);
-      wxApiData.set(new WxPayApiData(url, requestStr, responseString, null));
+      if (this.getConfig().isIfSaveApiData()) {
+        wxApiData.set(new WxPayApiData(url, requestStr, responseString, null));
+      }
       return responseString;
     } catch (Exception e) {
       this.log.error("\n【请求地址】：{}\n【请求数据】：{}\n【异常信息】：{}", url, requestStr, e.getMessage());
@@ -87,7 +92,7 @@ public class WxPayServiceJoddHttpImpl extends BaseWxPayServiceImpl {
     try {
       this.log.debug("【微信服务器响应头信息】：\n{}", response.toString(false));
     } catch (NullPointerException e) {
-      throw new WxPayException("response.toString() 居然抛出空指针异常了", e);
+      this.log.warn("HttpResponse.toString() 居然抛出空指针异常了", e);
     }
 
     String responseString = response.bodyText();
